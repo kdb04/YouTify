@@ -1,22 +1,13 @@
 from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
-firefox_path = os.getenv("FIREFOX")
-driver_path = os.getenv("GECKODRIVER")
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
 options = Options()
-options.binary_location = str(firefox_path)
-options.add_argument("--headless")
+options.add_experimental_option("detach", True)
 
-service = Service(executable_path=str(driver_path))
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-driver = webdriver.Firefox(service=service, options=options)
-driver.get("https://www.google.com")
+driver.get("https://music.youtube.com")
 print(driver.title)
 
-driver.quit()
