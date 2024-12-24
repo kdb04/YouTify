@@ -173,4 +173,5 @@ cython_debug/
 .env
 client_secrets.json
 test.py
+test2.py
 
