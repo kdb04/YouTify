@@ -1,10 +1,11 @@
+from contextlib import ExitStack
+from logging import exception
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions
+from collections import defaultdict
 import time
 
 def setup():
@@ -91,11 +92,74 @@ def list_songs(driver, playlist_url):
     except Exception as e:
         print(f"Error occured. {str(e)}")
 
+def find_duplicates(driver, playlist_url):
+    try:
+        print("Opening playlist")
+        driver.get(playlist_url)
+        print("Waiting for page to load")
+        time.sleep(5)
+
+        scroll_playlist(driver)
+
+        songs = driver.find_elements(By.CSS_SELECTOR, "ytmusic-responsive-list-item-renderer")
+        print("\nChecking for duplicates...")
+
+        songs_count = defaultdict(list)
+
+        for i, song in enumerate(songs, 1):
+            try:
+                title = None
+                artist = None
+
+                try:
+                    title = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
+                except:
+                    try:
+                        title = song.find_element(By.CSS_SELECTOR, "[title]").get_attribute("title")
+                    except:
+                        pass
+
+                try:
+                    artist = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
+                except:
+                    try:
+                        res = song.find_elements(By.CSS_SELECTOR, "yt-formatted-string")
+                        if len(res)>1:
+                            artist = res[1].text
+                    except:
+                        pass
+
+                if title and artist:
+                    k = (title.lower(), artist.lower())
+                    songs_count[k].append((i, f"{title} - {artist}"))
+
+            except Exception as e:
+                print(f"Error checking song {i}: {str(e)}")
+
+            if i%50 == 0:
+                time.sleep(2)
+
+        dup = {k:v for k, v in songs_count.items() if len(v)>1}  #Filtering only duplicates
+
+        if dup:
+            print("\n Duplicates found")
+            for song, pos in dup.items():
+                song_info = pos[0][1]
+                pos_list = [str(p[0]) for p in pos]
+                print(f"\n{song_info}")
+                print(f"Found at positons: {','.join(pos_list)}")
+        else:
+            print("\nNo duplicates found.")
+
+    except Exception as e:
+        print(f"Error finding duplicates: {str(e)}")
+
 def display(driver, playlist_url):
     while True:
         print("==YTM Manager==")
         print("1.List all songs")
-        print("2.Exit")
+        print("2.List duplicates in the playlist")
+        print("3.Exit")
 
         choice = int(input("Enter your choice(1-2):"))
 
@@ -104,6 +168,10 @@ def display(driver, playlist_url):
             input("Press enter to continue")
 
         elif choice == 2:
+            find_duplicates(driver, playlist_url)
+            input("Press enter to continue")
+
+        elif choice == 3:
             print("Exiting program")
             driver.quit()
             break
