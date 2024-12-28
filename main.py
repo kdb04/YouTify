@@ -5,6 +5,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from collections import defaultdict
 import time
+import discord
+from dotenv import load_dotenv
+import os
+from discord.ext import commands
+import threading
+
+bot_ready = threading.Event() #to handle opening menu only after bot is connected
 
 def setup():
     options = Options()
@@ -16,7 +23,7 @@ def setup():
 #print(driver.title)
 
 def scroll_playlist(driver):
-    print("Scrolling playlist.....")
+    print("Scrolling playlist...")
     prev_count = 0
     same_count = 0
 
@@ -152,6 +159,42 @@ def find_duplicates(driver, playlist_url):
     except Exception as e:
         print(f"Error finding duplicates: {str(e)}")
 
+def disc_notifs(driver, playlist_url, disc_channelid):
+    load_dotenv()
+    TOKEN = os.getenv("DISCORD_TOKEN")
+
+    if not TOKEN:
+        print("Error finding bot")
+        return
+
+    #bot setup
+    intents = discord.Intents.default()
+    intents.message_content = True
+    bot = commands.Bot(command_prefix="/", intents=intents)
+
+    @bot.event
+    async def on_ready():
+        print(f"Bot connected: {bot.user}")
+        channel = bot.get_channel(int(disc_channelid))
+        if channel:
+            await channel.send("YTM notification monitor live")
+            print(f"Sent message to channel: {channel.name}")
+        else:
+            print("Couldn't find channel")
+        bot_ready.set()
+
+    """test command 
+    @bot.command(name="ping")
+    async def ping(ctx):
+        await ctx.send("Pinged")
+    """
+
+    try:
+        bot.run(TOKEN)
+    except Exception as e:
+        print(f"Failed to start bot: {str(e)}")
+        bot_ready.set()
+
 def display(driver, playlist_url):
     while True:
         print("==YTM Manager==")
@@ -177,10 +220,22 @@ def display(driver, playlist_url):
         else:
             print("Invalid choice")
 
-
 def main():
     playlist_url = input("Enter playlist URL:")
+    disc_channelid = input("Enter Discord channel ID:")
     driver = setup()
+
+    bot_thread = threading.Thread(
+        target=disc_notifs,
+        args=(driver, playlist_url, disc_channelid),
+        daemon=True
+    )
+    bot_thread.start()
+
+    print("Waiting for bot to connect...")
+    bot_ready.wait()
+    print("Bot ready! Opening menu...")
+
     display(driver, playlist_url)
 
 if __name__ == "__main__":
