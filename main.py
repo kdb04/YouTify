@@ -8,8 +8,10 @@ import time
 import discord
 from dotenv import load_dotenv
 import os
-from discord.ext import commands
+from discord.ext import commands, tasks
 import threading
+import asyncio
+from selenium.common.exceptions import NoSuchElementException
 
 bot_ready = threading.Event() #to handle opening menu only after bot is connected
 
@@ -172,6 +174,8 @@ def disc_notifs(driver, playlist_url, disc_channelid):
     intents.message_content = True
     bot = commands.Bot(command_prefix="/", intents=intents)
 
+    prev_songs = set() #playlist before update
+
     @bot.event
     async def on_ready():
         print(f"Bot connected: {bot.user}")
@@ -183,11 +187,53 @@ def disc_notifs(driver, playlist_url, disc_channelid):
             print("Couldn't find channel")
         bot_ready.set()
 
-    """test command 
+    """test command
     @bot.command(name="ping")
     async def ping(ctx):
-        await ctx.send("Pinged")
-    """
+        await ctx.send("Pinged")"""
+
+    @tasks.loop(minutes=5)
+    async def playlist_updates():
+        try:
+            driver.get(playlist_url)
+            await asyncio.sleep(5)
+
+            scroll_playlist(driver)
+
+            cur_songs = set()
+            songs = driver.find_elements(By.CSS_SELECTOR, "ytmusic-responsive-list-item-renderer")
+
+            for song in songs:
+                try:
+                    title = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
+                    artist = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
+                    cur_songs.add(f"{title}-{artist}")
+                except NoSuchElementException:
+                    continue
+
+            if not prev_songs:
+                prev_songs.update(cur_songs)
+                return
+
+            added_songs = cur_songs - prev_songs
+            deleted_songs = prev_songs - cur_songs
+
+            channel = bot.get_channel(disc_channelid)
+
+            if added_songs: #Adding song msg on server
+                add_msg = "🎵New song added".join(f"{song}" for song in added_songs)
+                await channel.send(add_msg)
+
+            if deleted_songs: #Removing song msg on server
+                deleted_msg = "🗑️Song deleted".join(f"{song}" for song in deleted_songs)
+                await channel.send(deleted_msg)
+
+            prev_songs.clear()
+            prev_songs.update(cur_songs)
+
+        except Exception as e:
+            channel = bot.get_channel(disc_channelid)
+            await channel.send(f"⚠️ Error monitoring playlist: {str(e)}")
 
     try:
         bot.run(TOKEN)
