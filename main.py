@@ -14,6 +14,7 @@ import asyncio
 from selenium.common.exceptions import NoSuchElementException
 
 bot_ready = threading.Event() #to handle opening menu only after bot is connected
+notif_active = threading.Event() #notif loop
 
 def setup():
     options = Options()
@@ -161,6 +162,25 @@ def find_duplicates(driver, playlist_url):
     except Exception as e:
         print(f"Error finding duplicates: {str(e)}")
 
+def get_songs(driver, playlist_url):
+    driver.get(playlist_url)
+    time.sleep(5)
+
+    scroll_playlist(driver)
+
+    cur_songs = set()
+    songs = driver.find_elements(By.CSS_SELECTOR, "ytm-responsive-list-item-renderer")
+
+    for song in songs:
+        try:
+            title = songs.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
+            artist = songs.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
+            cur_songs.add(f"{title}-{artist}")
+        except NoSuchElementException:
+            continue
+
+    return cur_songs
+
 def disc_notifs(driver, playlist_url, disc_channelid):
     load_dotenv()
     TOKEN = os.getenv("DISCORD_TOKEN")
@@ -183,6 +203,7 @@ def disc_notifs(driver, playlist_url, disc_channelid):
         if channel:
             await channel.send("YTM notification monitor live")
             print(f"Sent message to channel: {channel.name}")
+            playlist_updates.start()
         else:
             print("Couldn't find channel")
         bot_ready.set()
@@ -192,24 +213,14 @@ def disc_notifs(driver, playlist_url, disc_channelid):
     async def ping(ctx):
         await ctx.send("Pinged")"""
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def playlist_updates():
+        if not notif_active.is_set():
+            playlist_updates.stop()
+            return
+
         try:
-            driver.get(playlist_url)
-            await asyncio.sleep(5)
-
-            scroll_playlist(driver)
-
-            cur_songs = set()
-            songs = driver.find_elements(By.CSS_SELECTOR, "ytmusic-responsive-list-item-renderer")
-
-            for song in songs:
-                try:
-                    title = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
-                    artist = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
-                    cur_songs.add(f"{title}-{artist}")
-                except NoSuchElementException:
-                    continue
+            cur_songs = get_songs(driver, playlist_url)
 
             if not prev_songs:
                 prev_songs.update(cur_songs)
@@ -218,37 +229,35 @@ def disc_notifs(driver, playlist_url, disc_channelid):
             added_songs = cur_songs - prev_songs
             deleted_songs = prev_songs - cur_songs
 
-            channel = bot.get_channel(disc_channelid)
+            channel = bot.get_channel(int(disc_channelid))
 
-            if added_songs: #Adding song msg on server
-                add_msg = "🎵New song added".join(f"{song}" for song in added_songs)
-                await channel.send(add_msg)
+            if added_songs:
+                for song in added_songs:
+                    await channel.send(f"🎵 New song added: {song}")
 
-            if deleted_songs: #Removing song msg on server
-                deleted_msg = "🗑️Song deleted".join(f"{song}" for song in deleted_songs)
-                await channel.send(deleted_msg)
+            if deleted_songs:
+                for song in deleted_songs:
+                    await channel.send(f"🗑️ Song deleted: {song}")
 
             prev_songs.clear()
             prev_songs.update(cur_songs)
 
         except Exception as e:
-            channel = bot.get_channel(disc_channelid)
-            await channel.send(f"⚠️ Error monitoring playlist: {str(e)}")
+            channel = bot.get_channel(int(disc_channelid))
+            await channel.send(f"Error monitoring playlist: {str(e)}")
 
-    try:
-        bot.run(TOKEN)
-    except Exception as e:
-        print(f"Failed to start bot: {str(e)}")
-        bot_ready.set()
+    return bot, TOKEN
 
 def display(driver, playlist_url):
     while True:
         print("==YTM Manager==")
         print("1.List all songs")
         print("2.List duplicates in the playlist")
-        print("3.Exit")
+        print("3.Start monitoring playlist")
+        print("4.Stop monitoring playlist")
+        print("5.Exit")
 
-        choice = int(input("Enter your choice(1-2):"))
+        choice = int(input("Enter your choice(1-5):"))
 
         if choice == 1:
             list_songs(driver, playlist_url)
@@ -259,6 +268,21 @@ def display(driver, playlist_url):
             input("Press enter to continue")
 
         elif choice == 3:
+            if not notif_active.is_set():
+                notif_active.set()
+                print("Notif monitoring started")
+            else:
+                print("Notif monitoring already active")
+
+        elif choice == 4:
+            if notif_active.is_set():
+                notif_active.clear()
+                print("Notif monitoring stopped")
+            else:
+                print("Notif monitoring already stopped")
+
+        elif choice == 5:
+            notif_active.clear()
             print("Exiting program")
             driver.quit()
             break
@@ -272,8 +296,7 @@ def main():
     driver = setup()
 
     bot_thread = threading.Thread(
-        target=disc_notifs,
-        args=(driver, playlist_url, disc_channelid),
+        target=lambda: asyncio.run(disc_notifs(driver, playlist_url, disc_channelid)[0].start(disc_notifs(driver, playlist_url, disc_channelid)[1])),
         daemon=True
     )
     bot_thread.start()
