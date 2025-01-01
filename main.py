@@ -239,8 +239,8 @@ def get_songs(driver, playlist_url):
 
     for song in songs:
         try:
-            title = songs.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
-            artist = songs.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
+            title = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
+            artist = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
             cur_songs.add(f"{title}-{artist}")
         except NoSuchElementException:
             continue
