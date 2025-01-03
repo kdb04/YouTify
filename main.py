@@ -5,13 +5,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from collections import defaultdict
 import time
-import discord
-from dotenv import load_dotenv
-import os
-from discord.ext import commands, tasks
 import threading
-import asyncio
-from selenium.common.exceptions import NoSuchElementException
 
 bot_ready = threading.Event() #to handle opening menu only after bot is connected
 notif_active = threading.Event() #notif loop
@@ -232,103 +226,15 @@ def search_song(driver, playlist_url):
     except Exception as e:
         print(f"Error searching for song: {str(e)}")
 
-def get_songs(driver, playlist_url):
-    driver.get(playlist_url)
-    time.sleep(5)
-
-    scroll_playlist(driver)
-
-    cur_songs = set()
-    songs = driver.find_elements(By.CSS_SELECTOR, "ytm-responsive-list-item-renderer")
-
-    for song in songs:
-        try:
-            title = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.title-column").text
-            artist = song.find_element(By.CSS_SELECTOR, "yt-formatted-string.flex-column").text
-            cur_songs.add(f"{title}-{artist}")
-        except NoSuchElementException:
-            continue
-
-    return cur_songs
-
-def disc_notifs(driver, playlist_url, disc_channelid):
-    load_dotenv()
-    TOKEN = os.getenv("DISCORD_TOKEN")
-
-    if not TOKEN:
-        print("Error finding bot")
-        return
-
-    #bot setup
-    intents = discord.Intents.default()
-    intents.message_content = True
-    bot = commands.Bot(command_prefix="/", intents=intents)
-
-    prev_songs = set() #playlist before update
-
-    @bot.event
-    async def on_ready():
-        print(f"Bot connected: {bot.user}")
-        channel = bot.get_channel(int(disc_channelid))
-        if channel:
-            await channel.send("YTM notification monitor live")
-            print(f"Sent message to channel: {channel.name}")
-            playlist_updates.start()
-        else:
-            print("Couldn't find channel")
-        bot_ready.set()
-
-    """test command
-    @bot.command(name="ping")
-    async def ping(ctx):
-        await ctx.send("Pinged")"""
-
-    @tasks.loop(minutes=1)
-    async def playlist_updates():
-        if not notif_active.is_set():
-            playlist_updates.stop()
-            return
-
-        try:
-            cur_songs = get_songs(driver, playlist_url)
-
-            if not prev_songs:
-                prev_songs.update(cur_songs)
-                return
-
-            added_songs = cur_songs - prev_songs
-            deleted_songs = prev_songs - cur_songs
-
-            channel = bot.get_channel(int(disc_channelid))
-
-            if added_songs:
-                for song in added_songs:
-                    await channel.send(f"🎵 New song added: {song}")
-
-            if deleted_songs:
-                for song in deleted_songs:
-                    await channel.send(f"🗑️ Song deleted: {song}")
-
-            prev_songs.clear()
-            prev_songs.update(cur_songs)
-
-        except Exception as e:
-            channel = bot.get_channel(int(disc_channelid))
-            await channel.send(f"Error monitoring playlist: {str(e)}")
-
-    return bot, TOKEN
-
 def display(driver, playlist_url):
     while True:
         print("==YTM Manager==")
         print("1.List all songs")
         print("2.List duplicates in the playlist")
         print("3.Search within playlist")
-        print("4.Start monitoring playlist")
-        print("5.Stop monitoring playlist")
-        print("6.Exit")
+        print("4.Exit")
 
-        choice = int(input("Enter your choice(1-6):"))
+        choice = int(input("Enter your choice(1-4):"))
 
         if choice == 1:
             list_songs(driver, playlist_url)
@@ -343,20 +249,6 @@ def display(driver, playlist_url):
             input("Press enter to continue")
 
         elif choice == 4:
-            if not notif_active.is_set():
-                notif_active.set()
-                print("Notif monitoring started")
-            else:
-                print("Notif monitoring already active")
-
-        elif choice == 5:
-            if notif_active.is_set():
-                notif_active.clear()
-                print("Notif monitoring stopped")
-            else:
-                print("Notif monitoring already stopped")
-
-        elif choice == 6:
             notif_active.clear()
             print("Exiting program")
             driver.quit()
@@ -367,18 +259,9 @@ def display(driver, playlist_url):
 
 def main():
     playlist_url = input("Enter playlist URL:")
-    disc_channelid = input("Enter Discord channel ID:")
     driver = setup()
 
-    bot_thread = threading.Thread(
-        target=lambda: asyncio.run(disc_notifs(driver, playlist_url, disc_channelid)[0].start(disc_notifs(driver, playlist_url, disc_channelid)[1])),
-        daemon=True
-    )
-    bot_thread.start()
-
-    print("Waiting for bot to connect...")
-    bot_ready.wait()
-    print("Bot ready! Opening menu...")
+    print("Opening menu...")
 
     display(driver, playlist_url)
 
